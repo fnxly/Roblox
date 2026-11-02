@@ -599,6 +599,59 @@ local function toggleFlyPanel()
 	end
 end
 
+---------------------------------------------------------------- SPECTATE / TELEPORT
+local spectateTarget = nil
+local spectateConn = nil
+
+local function getOwnHumanoid()
+	local char = player.Character
+	return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function setCameraSubject(subject)
+	local cam = workspace.CurrentCamera
+	if not cam or not subject then return end
+	cam.CameraType = Enum.CameraType.Custom
+	cam.CameraSubject = subject
+end
+
+local function spectate(targetPlayer)
+	if spectateConn then
+		spectateConn:Disconnect()
+		spectateConn = nil
+	end
+	spectateTarget = targetPlayer
+
+	local function apply(char)
+		if spectateTarget ~= targetPlayer then return end
+		local hum = char and char:WaitForChild("Humanoid", 5)
+		if hum then
+			setCameraSubject(hum)
+		end
+	end
+
+	apply(targetPlayer.Character)
+	spectateConn = targetPlayer.CharacterAdded:Connect(apply)
+end
+
+local function stopSpectate()
+	if spectateConn then
+		spectateConn:Disconnect()
+		spectateConn = nil
+	end
+	spectateTarget = nil
+	setCameraSubject(getOwnHumanoid())
+end
+
+local function teleportTo(targetPlayer)
+	local myChar = player.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+	local tChar = targetPlayer.Character
+	local tRoot = tChar and tChar:FindFirstChild("HumanoidRootPart")
+	if not (myRoot and tRoot) then return end
+	myRoot.CFrame = tRoot.CFrame * CFrame.new(0, 0, 3)
+end
+
 ---------------------------------------------------------------- PAGE: MAIN UI
 local gui = Instance.new("ScreenGui")
 gui.Name = "DeployUI"
@@ -1057,6 +1110,7 @@ closeBtn.Active = true
 closeBtn.AutoButtonColor = true
 closeBtn.Parent = main
 corner(closeBtn, 11)
+
 ---------------------------------------------------------------- free mouse logic
 local freeMouseOn = false
 local savedBehavior, savedIcon
@@ -1084,51 +1138,48 @@ end
 ---------------------------------------------------------------- unload (ปุ่ม X)
 
 local function unload()
-    -- ปิดระบบต่าง ๆ ก่อน
-    pcall(function() setFullbright(false) end)
-    pcall(function() setInstantPickup(false) end)
-    pcall(function() setFreeMouse(false) end)
-    pcall(function() setOpenJump(false) end)
+	-- ปิดระบบต่าง ๆ ก่อน
+	pcall(function() setFullbright(false) end)
+	pcall(function() setInstantPickup(false) end)
+	pcall(function() setFreeMouse(false) end)
+	pcall(function() setOpenJump(false) end)
 
-    -- ปิด Fly
-    if flyTeardown then
-        pcall(flyTeardown)
-        flyTeardown = nil
-        flyPanel = nil
-        flyRunning = false
-    end
+	-- ปิด Fly
+	if flyTeardown then
+		pcall(flyTeardown)
+		flyTeardown = nil
+		flyPanel = nil
+		flyRunning = false
+	end
 
-    -- หยุด Spectate (ป้องกัน Error หากไม่มีฟังก์ชัน)
-    if typeof(stopSpectate) == "function" then
-        pcall(stopSpectate)
-    end
+	-- หยุด Spectate
+	pcall(stopSpectate)
 
-    pcall(forceUnfly)
+	pcall(forceUnfly)
 
-    -- ยกเลิก RenderStep
-    pcall(function()
-        RunService:UnbindFromRenderStep("FreeMouse")
-    end)
+	-- ยกเลิก RenderStep
+	pcall(function()
+		RunService:UnbindFromRenderStep("FreeMouse")
+	end)
 
-    -- ตัด Connection ทั้งหมด
-    for _, conn in ipairs(connections) do
-        pcall(function()
-            conn:Disconnect()
-        end)
-    end
-    connections = {}
+	-- ตัด Connection ทั้งหมด
+	for _, conn in ipairs(connections) do
+		pcall(function()
+			conn:Disconnect()
+		end)
+	end
+	connections = {}
 
-    -- ลบ UI
-    if gui and gui.Parent then
-        gui:Destroy()
-    end
+	-- ลบ UI
+	if gui and gui.Parent then
+		gui:Destroy()
+	end
 
-    -- ลบ Script
-    script:Destroy()
+	-- ลบ Script
+	script:Destroy()
 end
 
 track(closeBtn.Activated:Connect(unload))
-
 
 ---------------------------------------------------------------- input handling (keybinds)
 track(UserInputService.InputBegan:Connect(function(input, gameProcessed)
