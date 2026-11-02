@@ -5,6 +5,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TeleportService = game:GetService("TeleportService")
+local StarterGui = game:GetService("StarterGui")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -19,7 +20,6 @@ local COLORS = {
 	Button = Color3.fromRGB(62, 36, 44),
 }
 
--- เก็บ connection ทั้งหมดไว้ เพื่อ disconnect ตอนปิด UI
 local connections = {}
 local function track(conn)
 	table.insert(connections, conn)
@@ -58,7 +58,6 @@ local function label(parent, text, size, props)
 	return l
 end
 
--- คืนค่า row, setState (ใช้ตั้งสวิตช์จากภายนอกได้)
 local function makeToggle(parent, text, default, callback)
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, -10, 0, 28)
@@ -118,7 +117,6 @@ local originals = {}
 local function setFullbright(state)
 	if state == fullbrightOn then return end
 	fullbrightOn = state
-
 	if state then
 		for prop in pairs(FULLBRIGHT) do
 			originals[prop] = Lighting[prop]
@@ -143,7 +141,7 @@ end
 
 ---------------------------------------------------------------- instant pickup logic
 local instantOn = false
-local promptOriginals = {} -- [ProximityPrompt] = ค่า HoldDuration เดิม
+local promptOriginals = {}
 
 local function setInstantPrompt(prompt)
 	if promptOriginals[prompt] == nil then
@@ -155,7 +153,6 @@ end
 local function setInstantPickup(state)
 	if state == instantOn then return end
 	instantOn = state
-
 	if state then
 		for _, obj in ipairs(workspace:GetDescendants()) do
 			if obj:IsA("ProximityPrompt") then
@@ -172,7 +169,6 @@ local function setInstantPickup(state)
 	end
 end
 
--- prompt ที่เกิดใหม่ตอนเปิดอยู่ ให้แก้ทันที และกันสคริปต์อื่นตั้งค่ากลับ
 track(workspace.DescendantAdded:Connect(function(obj)
 	if obj:IsA("ProximityPrompt") then
 		if instantOn then
@@ -186,50 +182,424 @@ track(workspace.DescendantAdded:Connect(function(obj)
 	end
 end))
 
----------------------------------------------------------------- spectate logic
-local spectateTarget = nil
-local originalSubject = nil
-local originalCameraType = nil
+---------------------------------------------------------------- open jump logic
+local openJumpOn = false
+local JUMP_POWER = 50
+local JUMP_HEIGHT = 7.2
+local jumpRequested = false
 
-local function getHumanoid(p)
-	return p and p.Character and p.Character:FindFirstChildOfClass("Humanoid")
+local function getHum()
+	local char = player.Character
+	return char and char:FindFirstChildOfClass("Humanoid")
 end
 
-local function stopSpectate()
-	local cam = workspace.CurrentCamera
-	if cam then
-		cam.CameraType = originalCameraType or Enum.CameraType.Custom
-		cam.CameraSubject = originalSubject or getHumanoid(player)
+local function restoreJump(hum)
+	if not hum then return end
+	if hum.PlatformStand and not openJumpOn then return end
+	hum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+	if hum.UseJumpPower then
+		if hum.JumpPower < 1 then hum.JumpPower = JUMP_POWER end
+	else
+		if hum.JumpHeight < 1 then hum.JumpHeight = JUMP_HEIGHT end
 	end
-	spectateTarget = nil
 end
 
-local function spectate(p)
-	local cam = workspace.CurrentCamera
-	local hum = getHumanoid(p)
-	if not cam or not hum then return end
-
-	if not spectateTarget then
-		originalSubject = cam.CameraSubject
-		originalCameraType = cam.CameraType
+track(UserInputService.JumpRequest:Connect(function()
+	if openJumpOn then
+		jumpRequested = true
 	end
-	spectateTarget = p
-	cam.CameraType = Enum.CameraType.Custom
-	cam.CameraSubject = hum
+end))
+
+track(RunService.Heartbeat:Connect(function()
+	if not openJumpOn then
+		jumpRequested = false
+		return
+	end
+
+	local hum = getHum()
+	if not hum or hum.Health <= 0 then
+		jumpRequested = false
+		return
+	end
+
+	restoreJump(hum)
+
+	if jumpRequested then
+		jumpRequested = false
+		if hum.FloorMaterial ~= Enum.Material.Air then
+			hum:ChangeState(Enum.HumanoidStateType.Jumping)
+		end
+	end
+end))
+
+track(player.CharacterAdded:Connect(function()
+	task.wait(0.5)
+	if openJumpOn then restoreJump(getHum()) end
+end))
+
+local function setOpenJump(state)
+	openJumpOn = state
+	if state then restoreJump(getHum()) end
 end
 
----------------------------------------------------------------- teleport logic
-local function teleportTo(p)
-	local myChar = player.Character
-	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-	local targetRoot = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-	if not myRoot or not targetRoot then return end
+---------------------------------------------------------------- FORCE UNFLY (คืนค่าตัวละครให้ตกลงพื้นปกติ)
+local function forceUnfly()
+	local char = player.Character
+	if not char then return end
 
-	-- วางตัวเราห่างจากเป้าหมายเล็กน้อย กันทับกัน
-	myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+	for _, d in ipairs(char:GetDescendants()) do
+		if d:IsA("BodyGyro") or d:IsA("BodyVelocity") or d:IsA("BodyPosition") then
+			d:Destroy()
+		end
+	end
+
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.PlatformStand = false
+		for _, st in ipairs({
+			Enum.HumanoidStateType.Climbing,
+			Enum.HumanoidStateType.FallingDown,
+			Enum.HumanoidStateType.Flying,
+			Enum.HumanoidStateType.Freefall,
+			Enum.HumanoidStateType.GettingUp,
+			Enum.HumanoidStateType.Jumping,
+			Enum.HumanoidStateType.Landed,
+			Enum.HumanoidStateType.Physics,
+			Enum.HumanoidStateType.PlatformStanding,
+			Enum.HumanoidStateType.Ragdoll,
+			Enum.HumanoidStateType.Running,
+			Enum.HumanoidStateType.RunningNoPhysics,
+			Enum.HumanoidStateType.Seated,
+			Enum.HumanoidStateType.StrafingNoPhysics,
+			Enum.HumanoidStateType.Swimming,
+		}) do
+			hum:SetStateEnabled(st, true)
+		end
+		hum:ChangeState(Enum.HumanoidStateType.Freefall)
+	end
+
+	local animate = char:FindFirstChild("Animate")
+	if animate then animate.Disabled = false end
 end
 
----------------------------------------------------------------- main window
+---------------------------------------------------------------- FLY GUI V3 (ต้นฉบับรวมในฟังก์ชันเดียว)
+local flyPanel = nil
+local flyBtnRef = nil
+local flyRunning = false
+local flyTeardown = nil
+
+local function buildFlyPanel()
+	local flyConns = {}
+	local speeds = 1
+	local nowe = false
+	local tpwalking = false
+	local tis, dis
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "FlyGuiV3"
+	gui.ResetOnSpawn = false
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.Parent = playerGui
+
+	local Frame = Instance.new("Frame")
+	Frame.Parent = gui
+	Frame.BackgroundColor3 = Color3.fromRGB(163, 255, 137)
+	Frame.BorderColor3 = Color3.fromRGB(103, 221, 213)
+	Frame.Position = UDim2.new(0.1, 0, 0.38, 0)
+	Frame.Size = UDim2.new(0, 190, 0, 57)
+	Frame.Active = true
+	Frame.Draggable = true
+
+	local function mkBtn(name, text, color, size, pos, textSize)
+		local b = Instance.new("TextButton")
+		b.Name = name
+		b.Parent = Frame
+		b.BackgroundColor3 = color
+		b.Size = size
+		b.Position = pos
+		b.Font = Enum.Font.SourceSans
+		b.Text = text
+		b.TextColor3 = Color3.fromRGB(0, 0, 0)
+		b.TextSize = textSize or 14
+		return b
+	end
+
+	local up = mkBtn("up", "UP", Color3.fromRGB(79, 255, 152), UDim2.new(0, 44, 0, 28), UDim2.new(0, 0, 0, 0))
+	local down = mkBtn("down", "DOWN", Color3.fromRGB(215, 255, 121), UDim2.new(0, 44, 0, 28), UDim2.new(0, 0, 0.491, 0))
+	local onof = mkBtn("onof", "fly", Color3.fromRGB(255, 249, 74), UDim2.new(0, 56, 0, 28), UDim2.new(0.703, 0, 0.491, 0))
+	local plus = mkBtn("plus", "+", Color3.fromRGB(133, 145, 255), UDim2.new(0, 45, 0, 28), UDim2.new(0.232, 0, 0, 0))
+	local mine = mkBtn("mine", "-", Color3.fromRGB(123, 255, 247), UDim2.new(0, 45, 0, 29), UDim2.new(0.232, 0, 0.491, 0))
+	local closebutton = mkBtn("Close", "X", Color3.fromRGB(225, 25, 0), UDim2.new(0, 45, 0, 28), UDim2.new(0, 0, -1, 27), 30)
+	local mini = mkBtn("minimize", "-", Color3.fromRGB(192, 150, 230), UDim2.new(0, 45, 0, 28), UDim2.new(0, 44, -1, 27), 40)
+	local mini2 = mkBtn("minimize2", "+", Color3.fromRGB(192, 150, 230), UDim2.new(0, 45, 0, 28), UDim2.new(0, 44, -1, 57), 40)
+	mini2.Visible = false
+
+	local title = Instance.new("TextLabel")
+	title.Parent = Frame
+	title.BackgroundColor3 = Color3.fromRGB(242, 60, 255)
+	title.Position = UDim2.new(0.469, 0, 0, 0)
+	title.Size = UDim2.new(0, 100, 0, 28)
+	title.Font = Enum.Font.SourceSans
+	title.Text = "FLY GUI V3"
+	title.TextColor3 = Color3.fromRGB(0, 0, 0)
+	title.TextScaled = true
+	title.TextWrapped = true
+
+	local speedLbl = Instance.new("TextLabel")
+	speedLbl.Name = "speed"
+	speedLbl.Parent = Frame
+	speedLbl.BackgroundColor3 = Color3.fromRGB(255, 85, 0)
+	speedLbl.Position = UDim2.new(0.468, 0, 0.491, 0)
+	speedLbl.Size = UDim2.new(0, 44, 0, 28)
+	speedLbl.Font = Enum.Font.SourceSans
+	speedLbl.Text = "1"
+	speedLbl.TextColor3 = Color3.fromRGB(0, 0, 0)
+	speedLbl.TextScaled = true
+	speedLbl.TextWrapped = true
+
+	local function setHumanoidStates(hum, enabled)
+		local states = {
+			Enum.HumanoidStateType.Climbing,
+			Enum.HumanoidStateType.FallingDown,
+			Enum.HumanoidStateType.Flying,
+			Enum.HumanoidStateType.Freefall,
+			Enum.HumanoidStateType.GettingUp,
+			Enum.HumanoidStateType.Jumping,
+			Enum.HumanoidStateType.Landed,
+			Enum.HumanoidStateType.Physics,
+			Enum.HumanoidStateType.PlatformStanding,
+			Enum.HumanoidStateType.Ragdoll,
+			Enum.HumanoidStateType.Running,
+			Enum.HumanoidStateType.RunningNoPhysics,
+			Enum.HumanoidStateType.Seated,
+			Enum.HumanoidStateType.StrafingNoPhysics,
+			Enum.HumanoidStateType.Swimming,
+		}
+		for _, st in ipairs(states) do
+			hum:SetStateEnabled(st, enabled)
+		end
+	end
+
+	local function startWalkLoops()
+		tpwalking = false
+		for _ = 1, speeds do
+			task.spawn(function()
+				local hb = RunService.Heartbeat
+				tpwalking = true
+				local chr = player.Character
+				local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+				while tpwalking and hb:Wait() and chr and hum and hum.Parent do
+					if hum.MoveDirection.Magnitude > 0 then
+						chr:TranslateBy(hum.MoveDirection)
+					end
+				end
+			end)
+		end
+	end
+
+	local function stopFly()
+		if not nowe then return end
+		nowe = false
+		tpwalking = false
+		for _, c in ipairs(flyConns) do c:Disconnect() end
+		flyConns = {}
+		forceUnfly()
+	end
+
+	local function startFly()
+		if nowe then return end
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not (char and hum) then return end
+		nowe = true
+
+		startWalkLoops()
+
+		local animate = char:FindFirstChild("Animate")
+		if animate then animate.Disabled = true end
+
+		local animator = hum:FindFirstChildOfClass("Animator")
+		if animator then
+			for _, v in ipairs(hum:GetPlayingAnimationTracks()) do
+				v:AdjustSpeed(0)
+			end
+		end
+
+		setHumanoidStates(hum, false)
+		hum:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+		hum:ChangeState(Enum.HumanoidStateType.Swimming)
+
+		local rigTorso = (hum.RigType == Enum.HumanoidRigType.R6) and char:FindFirstChild("Torso")
+			or char:FindFirstChild("UpperTorso")
+		if not rigTorso then
+			stopFly()
+			return
+		end
+
+		local bg = Instance.new("BodyGyro")
+		bg.P = 9e4
+		bg.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+		bg.CFrame = rigTorso.CFrame
+		bg.Parent = rigTorso
+
+		local bv = Instance.new("BodyVelocity")
+		bv.Velocity = Vector3.new(0, 0.1, 0)
+		bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+		bv.Parent = rigTorso
+
+		hum.PlatformStand = true
+
+		local ctrl = { f = 0, b = 0, l = 0, r = 0 }
+		local lastctrl = { f = 0, b = 0, l = 0, r = 0 }
+		local maxspeed = 50
+		local speed = 0
+		local cam = workspace.CurrentCamera
+
+		local conn = RunService.RenderStepped:Connect(function()
+			if not nowe then return end
+			local curHum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			if not curHum or curHum.Health <= 0 then
+				stopFly()
+				return
+			end
+
+			local moveDir = curHum.MoveDirection
+			ctrl.f = -moveDir:Dot(cam.CFrame.LookVector)
+			ctrl.b = 0
+			ctrl.l = -moveDir:Dot(cam.CFrame.RightVector)
+			ctrl.r = 0
+
+			if ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0 then
+				speed = math.min(speed + 0.5 + (speed / maxspeed), maxspeed)
+				lastctrl = { f = ctrl.f, b = ctrl.b, l = ctrl.l, r = ctrl.r }
+			elseif speed ~= 0 then
+				speed = math.max(speed - 1, 0)
+			end
+
+			local c = (ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0) and ctrl or lastctrl
+			if (c.l + c.r) ~= 0 or (c.f + c.b) ~= 0 then
+				bv.Velocity = ((cam.CFrame.LookVector * (c.f + c.b))
+					+ ((cam.CFrame * CFrame.new(c.l + c.r, (c.f + c.b) * 0.2, 0).Position) - cam.CFrame.Position)) * speed
+			else
+				bv.Velocity = Vector3.new(0, 0, 0)
+			end
+
+			bg.CFrame = cam.CFrame * CFrame.Angles(-math.rad((c.f + c.b) * 50 * speed / maxspeed), 0, 0)
+		end)
+		table.insert(flyConns, conn)
+	end
+
+	local function toggleFly()
+		if nowe then
+			stopFly()
+		else
+			startFly()
+		end
+		onof.Text = nowe and "stop" or "fly"
+	end
+
+	local function applySpeed(delta)
+		speeds = math.max(1, speeds + delta)
+		speedLbl.Text = tostring(speeds)
+		if nowe then
+			startWalkLoops()
+		end
+	end
+
+	onof.MouseButton1Click:Connect(toggleFly)
+	plus.MouseButton1Click:Connect(function() applySpeed(1) end)
+	mine.MouseButton1Click:Connect(function() applySpeed(-1) end)
+
+	up.MouseButton1Down:Connect(function()
+		tis = up.MouseEnter:Connect(function()
+			while tis do
+				task.wait()
+				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+				if root then root.CFrame = root.CFrame * CFrame.new(0, 1, 0) end
+			end
+		end)
+	end)
+	up.MouseLeave:Connect(function()
+		if tis then tis:Disconnect() tis = nil end
+	end)
+	down.MouseButton1Down:Connect(function()
+		dis = down.MouseEnter:Connect(function()
+			while dis do
+				task.wait()
+				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+				if root then root.CFrame = root.CFrame * CFrame.new(0, -1, 0) end
+			end
+		end)
+	end)
+	down.MouseLeave:Connect(function()
+		if dis then dis:Disconnect() dis = nil end
+	end)
+
+	mini.MouseButton1Click:Connect(function()
+		up.Visible = false
+		down.Visible = false
+		onof.Visible = false
+		plus.Visible = false
+		speedLbl.Visible = false
+		mine.Visible = false
+		mini.Visible = false
+		mini2.Visible = true
+		Frame.BackgroundTransparency = 1
+		closebutton.Position = UDim2.new(0, 0, -1, 57)
+	end)
+	mini2.MouseButton1Click:Connect(function()
+		up.Visible = true
+		down.Visible = true
+		onof.Visible = true
+		plus.Visible = true
+		speedLbl.Visible = true
+		mine.Visible = true
+		mini.Visible = true
+		mini2.Visible = false
+		Frame.BackgroundTransparency = 0
+		closebutton.Position = UDim2.new(0, 0, -1, 27)
+	end)
+
+	local function teardown()
+		stopFly()
+		if tis then tis:Disconnect() tis = nil end
+		if dis then dis:Disconnect() dis = nil end
+		if gui.Parent then gui:Destroy() end
+	end
+
+	closebutton.MouseButton1Click:Connect(function()
+		teardown()
+		flyRunning = false
+		flyTeardown = nil
+		flyPanel = nil
+		if flyBtnRef then flyBtnRef.Text = "Click" end
+	end)
+
+	return gui, teardown
+end
+
+local function toggleFlyPanel()
+	if flyRunning then
+		if flyTeardown then flyTeardown() end
+		flyRunning = false
+		flyTeardown = nil
+		flyPanel = nil
+		if flyBtnRef then flyBtnRef.Text = "Click" end
+	else
+		local gui, teardown = buildFlyPanel()
+		flyPanel = gui
+		flyTeardown = teardown
+		flyRunning = true
+		if flyBtnRef then flyBtnRef.Text = "Close" end
+		StarterGui:SetCore("SendNotification", {
+			Title = "FLY GUI V3",
+			Text = "BY XNEO",
+			Duration = 5,
+		})
+	end
+end
+
+---------------------------------------------------------------- PAGE: MAIN UI
 local gui = Instance.new("ScreenGui")
 gui.Name = "DeployUI"
 gui.ResetOnSpawn = false
@@ -245,7 +615,6 @@ main.Parent = gui
 corner(main, 12)
 stroke(main, COLORS.Accent, 2)
 
--- Sidebar
 local sidebar = Instance.new("Frame")
 sidebar.Position = UDim2.fromOffset(10, 10)
 sidebar.Size = UDim2.new(0, 110, 1, -20)
@@ -291,7 +660,6 @@ local function navItem(text, onClick)
 	return b
 end
 
--- Profile ด้านล่าง
 local profile = Instance.new("Frame")
 profile.Size = UDim2.new(1, -10, 0, 44)
 profile.Position = UDim2.new(0, 5, 1, -50)
@@ -324,7 +692,6 @@ label(profile, "@" .. player.Name, 9, {
 	Font = Enum.Font.Gotham,
 })
 
--- หน้าหลัก (panel ด้านขวา)
 local funcPanel = Instance.new("Frame")
 funcPanel.Position = UDim2.fromOffset(130, 10)
 funcPanel.Size = UDim2.new(1, -140, 1, -20)
@@ -338,7 +705,6 @@ local pageTitle = label(funcPanel, "MAIN", 13, {
 	Size = UDim2.new(1, -20, 0, 20),
 })
 
--- แต่ละหน้าอยู่ใน frame ของตัวเอง
 local pageMain = Instance.new("Frame")
 pageMain.Size = UDim2.new(1, 0, 1, 0)
 pageMain.BackgroundTransparency = 1
@@ -368,7 +734,6 @@ navItem("ESP", function() showPage("ESP") end)
 navItem("Config", function() showPage("Config") end)
 
 ---------------------------------------------------------------- PAGE: MAIN
--- หัวข้อ Fullbright
 local fullbrightRow = Instance.new("Frame")
 fullbrightRow.Position = UDim2.fromOffset(10, 40)
 fullbrightRow.Size = UDim2.new(1, -20, 0, 50)
@@ -389,7 +754,6 @@ end)
 fullbrightToggle.Size = UDim2.new(1, 0, 0, 28)
 fullbrightToggle.Position = UDim2.fromOffset(0, 0)
 
--- หัวข้อ TAKE ITEM 1 CLICK DONT HOLD TIME
 local instantRow = Instance.new("Frame")
 instantRow.Position = UDim2.fromOffset(10, 100)
 instantRow.Size = UDim2.new(1, -20, 0, 50)
@@ -410,15 +774,34 @@ end)
 instantToggle.Size = UDim2.new(1, 0, 0, 28)
 instantToggle.Position = UDim2.fromOffset(0, 0)
 
--- หัวข้อ Fly
+local jumpRow = Instance.new("Frame")
+jumpRow.Position = UDim2.fromOffset(10, 160)
+jumpRow.Size = UDim2.new(1, -20, 0, 50)
+jumpRow.BackgroundTransparency = 1
+jumpRow.Parent = pageMain
+
+label(jumpRow, "Open Jump", 12)
+label(jumpRow, "ถ้าแมพไหนกระโดดไม่ได้ให้กดเปิด (เฉพาะคุณที่เห็น)", 10, {
+	Position = UDim2.fromOffset(0, 20),
+	Size = UDim2.new(1, -50, 0, 14),
+	TextColor3 = COLORS.Dim,
+	Font = Enum.Font.Gotham,
+})
+
+local openJumpToggle = makeToggle(jumpRow, "", false, function(state)
+	setOpenJump(state)
+end)
+openJumpToggle.Size = UDim2.new(1, 0, 0, 28)
+openJumpToggle.Position = UDim2.fromOffset(0, 0)
+
 local flyRow = Instance.new("Frame")
-flyRow.Position = UDim2.fromOffset(10, 160)
+flyRow.Position = UDim2.fromOffset(10, 220)
 flyRow.Size = UDim2.new(1, -20, 0, 50)
 flyRow.BackgroundTransparency = 1
 flyRow.Parent = pageMain
 
 label(flyRow, "Fly", 12)
-label(flyRow, "กดครั้งเดียวเพื่อเรียกใช้ฟังชั่น FLY", 10, {
+label(flyRow, "กดครั้งเดียวเพื่อเปิด/ปิดแผงบิน", 10, {
 	Position = UDim2.fromOffset(0, 20),
 	Size = UDim2.new(1, -50, 0, 14),
 	TextColor3 = COLORS.Dim,
@@ -437,14 +820,13 @@ flyBtn.AutoButtonColor = false
 flyBtn.Parent = flyRow
 corner(flyBtn, 6)
 
-track(flyBtn.MouseButton1Click:Connect(function()
-	-- ใส่โค้ดบินของคุณตรงนี้
-end))
+flyBtnRef = flyBtn
+track(flyBtn.MouseButton1Click:Connect(toggleFlyPanel))
 
----------------------------------------------------------------- PAGE: ESP (Players + Spectate + TP)
+---------------------------------------------------------------- PAGE: ESP
 local countLabel = label(pageESP, "Players in server: 0", 12, {
 	Position = UDim2.fromOffset(10, 40),
-	Size = UDim2.new(1, -230, 0, 18), -- แคบลงเพื่อเว้นที่ให้ปุ่ม Stop Spectate
+	Size = UDim2.new(1, -230, 0, 18),
 })
 
 local refreshBtn = Instance.new("TextButton")
@@ -459,7 +841,6 @@ refreshBtn.AutoButtonColor = false
 refreshBtn.Parent = pageESP
 corner(refreshBtn, 6)
 
--- ปุ่ม Stop Spectate อยู่ข้าง Refresh (สร้างครั้งเดียว)
 local stopBtn = Instance.new("TextButton")
 stopBtn.Size = UDim2.fromOffset(100, 22)
 stopBtn.Position = UDim2.new(1, -210, 0, 38)
@@ -558,7 +939,6 @@ end))
 refreshPlayers()
 
 ---------------------------------------------------------------- PAGE: CONFIG
--- หัวข้อตั้งปุ่มซ่อน/แสดง UI (พิมพ์ชื่อปุ่มได้)
 local toggleKey = Enum.KeyCode.RightShift
 
 local keyRow = Instance.new("Frame")
@@ -594,7 +974,6 @@ track(keyBtn.MouseButton1Click:Connect(function()
 	keyBtn.Text = "กดปุ่ม..."
 end))
 
--- หัวข้อ Free Mouse
 local FREE_MOUSE_KEY = Enum.KeyCode.RightAlt
 local waitingFreeKey = false
 
@@ -629,7 +1008,6 @@ track(freeKeyBtn.MouseButton1Click:Connect(function()
 	freeKeyBtn.Text = "กดปุ่ม..."
 end))
 
--- หัวข้อ Rejoin
 local rejoinRow = Instance.new("Frame")
 rejoinRow.Position = UDim2.fromOffset(10, 160)
 rejoinRow.Size = UDim2.new(1, -20, 0, 50)
@@ -665,23 +1043,24 @@ track(rejoinBtn.MouseButton1Click:Connect(function()
 	end
 end))
 
--- ปุ่มปิด (X) ลบทุกอย่างของสคริปต์ออก
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(22, 22)
-closeBtn.Position = UDim2.new(1, -28, 0, -10)
+closeBtn.Name = "CloseButton"
+closeBtn.Size = UDim2.fromOffset(28, 28)
+closeBtn.Position = UDim2.new(1, -35, 0, 5)
 closeBtn.BackgroundColor3 = COLORS.Accent
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 12
+closeBtn.TextSize = 14
 closeBtn.TextColor3 = COLORS.Text
 closeBtn.Text = "X"
+closeBtn.ZIndex = 100
+closeBtn.Active = true
+closeBtn.AutoButtonColor = true
 closeBtn.Parent = main
 corner(closeBtn, 11)
-
 ---------------------------------------------------------------- free mouse logic
 local freeMouseOn = false
 local savedBehavior, savedIcon
 
--- ทุกเฟรม บังคับให้เมาส์ไม่ล็อกกลางจอ (ทำงานหลังสคริปต์กล้องของเกม)
 RunService:BindToRenderStep("FreeMouse", Enum.RenderPriority.Last.Value, function()
 	if freeMouseOn and UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
@@ -691,7 +1070,6 @@ end)
 local function setFreeMouse(on)
 	if on == freeMouseOn then return end
 	freeMouseOn = on
-
 	if on then
 		savedBehavior = UserInputService.MouseBehavior
 		savedIcon = UserInputService.MouseIconEnabled
@@ -704,30 +1082,56 @@ local function setFreeMouse(on)
 end
 
 ---------------------------------------------------------------- unload (ปุ่ม X)
+
 local function unload()
-	-- คืนค่าทุกอย่างที่เปลี่ยนไปก่อน
-	setFullbright(false)
-	setInstantPickup(false)
-	setFreeMouse(false)
-	stopSpectate()
-	RunService:UnbindFromRenderStep("FreeMouse")
+    -- ปิดระบบต่าง ๆ ก่อน
+    pcall(function() setFullbright(false) end)
+    pcall(function() setInstantPickup(false) end)
+    pcall(function() setFreeMouse(false) end)
+    pcall(function() setOpenJump(false) end)
 
-	-- ตัดการเชื่อมต่อ event ทั้งหมด
-	for _, conn in ipairs(connections) do
-		conn:Disconnect()
-	end
-	connections = {}
+    -- ปิด Fly
+    if flyTeardown then
+        pcall(flyTeardown)
+        flyTeardown = nil
+        flyPanel = nil
+        flyRunning = false
+    end
 
-	-- ลบ UI และตัวสคริปต์
-	gui:Destroy()
-	script:Destroy()
+    -- หยุด Spectate (ป้องกัน Error หากไม่มีฟังก์ชัน)
+    if typeof(stopSpectate) == "function" then
+        pcall(stopSpectate)
+    end
+
+    pcall(forceUnfly)
+
+    -- ยกเลิก RenderStep
+    pcall(function()
+        RunService:UnbindFromRenderStep("FreeMouse")
+    end)
+
+    -- ตัด Connection ทั้งหมด
+    for _, conn in ipairs(connections) do
+        pcall(function()
+            conn:Disconnect()
+        end)
+    end
+    connections = {}
+
+    -- ลบ UI
+    if gui and gui.Parent then
+        gui:Destroy()
+    end
+
+    -- ลบ Script
+    script:Destroy()
 end
 
-track(closeBtn.MouseButton1Click:Connect(unload))
+track(closeBtn.Activated:Connect(unload))
+
 
 ---------------------------------------------------------------- input handling (keybinds)
 track(UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	-- รับปุ่มใหม่สำหรับ Toggle UI
 	if waitingToggleKey then
 		if input.UserInputType == Enum.UserInputType.Keyboard then
 			toggleKey = input.KeyCode
@@ -737,7 +1141,6 @@ track(UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		end
 	end
 
-	-- รับปุ่มใหม่สำหรับ Free Mouse
 	if waitingFreeKey then
 		if input.UserInputType == Enum.UserInputType.Keyboard then
 			FREE_MOUSE_KEY = input.KeyCode
