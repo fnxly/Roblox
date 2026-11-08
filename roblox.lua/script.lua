@@ -1058,7 +1058,7 @@ espToggleContainer.BackgroundTransparency = 1
 espToggleContainer.Parent = pageESP
 
 label(espToggleContainer, "ESP Highlight", 12)
-label(espToggleContainer, "ทีมเดียว = น้ำเงิน  |  ศัตรู = แดง  |  ทะลุกำแพง", 10, {
+label(espToggleContainer, "แสดงตัวผู้เล่น", 10, {
 	Position=UDim2.fromOffset(0,20), Size=UDim2.new(1,-50,0,14),
 	TextColor3=COLORS.Dim, Font=Enum.Font.Gotham,
 })
@@ -1192,34 +1192,7 @@ label(jumpContainer, "ถ้าแมพไหนกระโดดไม่ไ�
 local jumpToggle=makeToggle(jumpContainer,"",false,function(state) setOpenJump(state) end)
 jumpToggle.Size=UDim2.new(1,0,0,28); jumpToggle.Position=UDim2.fromOffset(0,0)
 
-local jpBox=Instance.new("TextBox")
-jpBox.Size=UDim2.new(1,-100,0,24); jpBox.Position=UDim2.fromOffset(0,68)
-jpBox.BackgroundColor3=COLORS.Button; jpBox.Font=Enum.Font.Gotham; jpBox.TextSize=12
-jpBox.TextColor3=COLORS.Text; jpBox.PlaceholderText="Jump Power (default 50)"
-jpBox.Text="50"; jpBox.ClearTextOnFocus=false; jpBox.Parent=jumpContainer
-corner(jpBox,6); stroke(jpBox,COLORS.Accent,1)
-
-local jpApply=Instance.new("TextButton")
-jpApply.Size=UDim2.fromOffset(80,24); jpApply.Position=UDim2.new(1,-80,0,68)
-jpApply.BackgroundColor3=COLORS.Accent; jpApply.Font=Enum.Font.GothamBold; jpApply.TextSize=11
-jpApply.TextColor3=COLORS.Text; jpApply.Text="Apply"; jpApply.AutoButtonColor=false
-jpApply.Parent=jumpContainer
-corner(jpApply,6)
-jpApply.MouseButton1Click:Connect(function()
-	local num=tonumber(jpBox.Text)
-	if num and num>0 then
-		JUMP_POWER=num; JUMP_HEIGHT=num*0.144
-		local hum=getHum()
-		if hum then
-			if hum.UseJumpPower then hum.JumpPower=JUMP_POWER else hum.JumpHeight=JUMP_HEIGHT end
-		end
-		jpApply.Text="✓"; task.delay(1,function() jpApply.Text="Apply" end)
-	else
-		jpApply.Text="!"; task.delay(1,function() jpApply.Text="Apply" end)
-	end
-end)
-
-local wsContainerY=jumpContainerY+110
+local wsContainerY=jumpContainerY+60
 local wsContainer=Instance.new("Frame")
 wsContainer.Position=UDim2.fromOffset(10,wsContainerY)
 wsContainer.Size=UDim2.new(1,-20,0,100)
@@ -1233,28 +1206,78 @@ label(wsContainer,"ปรับความเร็ววิ่ง (ค่า�
 local wsToggle=makeToggle(wsContainer,"",false,function(state) setWalkSpeed(state) end)
 wsToggle.Size=UDim2.new(1,0,0,28); wsToggle.Position=UDim2.fromOffset(0,0)
 
-local wsBox=Instance.new("TextBox")
-wsBox.Size=UDim2.new(1,-100,0,24); wsBox.Position=UDim2.fromOffset(0,68)
-wsBox.BackgroundColor3=COLORS.Button; wsBox.Font=Enum.Font.Gotham; wsBox.TextSize=12
-wsBox.TextColor3=COLORS.Text; wsBox.PlaceholderText="ความเร็ว (default 16)"
-wsBox.Text="16"; wsBox.ClearTextOnFocus=false; wsBox.Parent=wsContainer
-corner(wsBox,6); stroke(wsBox,COLORS.Accent,1)
+local wsContainerY=jumpContainerY+60
+do
+	local WS_MAX = 100
+	local wsContainer=Instance.new("Frame")
+	wsContainer.Position=UDim2.fromOffset(10,wsContainerY)
+	wsContainer.Size=UDim2.new(1,-20,0,70)
+	wsContainer.BackgroundTransparency=1; wsContainer.Parent=pageMisc
 
-local wsApply=Instance.new("TextButton")
-wsApply.Size=UDim2.fromOffset(80,24); wsApply.Position=UDim2.new(1,-80,0,68)
-wsApply.BackgroundColor3=COLORS.Accent; wsApply.Font=Enum.Font.GothamBold; wsApply.TextSize=11
-wsApply.TextColor3=COLORS.Text; wsApply.Text="Apply"; wsApply.AutoButtonColor=false
-wsApply.Parent=wsContainer
-corner(wsApply,6)
-wsApply.MouseButton1Click:Connect(function()
-	local num=tonumber(wsBox.Text)
-	if num and num>0 then
-		applyWalkSpeed(num)
-		wsApply.Text="✓"; task.delay(1,function() wsApply.Text="Apply" end)
-	else
-		wsApply.Text="!"; task.delay(1,function() wsApply.Text="Apply" end)
+	label(wsContainer,"Walk Speed",12)
+	label(wsContainer,"ปรับความเร็ววิ่ง (ค่าปกติ 16, max 100)",10,{
+		Position=UDim2.fromOffset(0,20),Size=UDim2.new(1,-50,0,14),
+		TextColor3=COLORS.Dim,Font=Enum.Font.Gotham,
+	})
+	local wsToggle=makeToggle(wsContainer,"",false,function(state) setWalkSpeed(state) end)
+	wsToggle.Size=UDim2.new(1,0,0,28); wsToggle.Position=UDim2.fromOffset(0,0)
+
+	local wsTrack=Instance.new("Frame")
+	wsTrack.Size=UDim2.new(1,0,0,6)
+	wsTrack.Position=UDim2.fromOffset(0,40)
+	wsTrack.BackgroundColor3=COLORS.Button
+	wsTrack.Parent=wsContainer
+	corner(wsTrack,3); stroke(wsTrack,COLORS.Accent,1)
+
+	local wsFill=Instance.new("Frame")
+	wsFill.Size=UDim2.new(customWalkSpeed/WS_MAX,0,1,0)
+	wsFill.BackgroundColor3=COLORS.Accent
+	wsFill.Parent=wsTrack
+	corner(wsFill,3)
+
+	local wsLabel=Instance.new("TextLabel")
+	wsLabel.Size=UDim2.fromOffset(60,16)
+	wsLabel.Position=UDim2.new(0.5,-30,0,50)
+	wsLabel.BackgroundTransparency=1
+	wsLabel.Font=Enum.Font.GothamBold; wsLabel.TextSize=11
+	wsLabel.TextColor3=COLORS.Text
+	wsLabel.Text=customWalkSpeed.."/"..WS_MAX
+	wsLabel.Parent=wsContainer
+
+	local wsDragging=false
+	local function updateWsSlider(absX)
+		local relX=math.clamp(absX - wsTrack.AbsolutePosition.X, 0, wsTrack.AbsoluteSize.X)
+		local frac=relX/wsTrack.AbsoluteSize.X
+		local value=math.max(1, math.floor(frac*WS_MAX+0.5))
+		customWalkSpeed=value
+		wsFill.Size=UDim2.new(value/WS_MAX,0,1,0)
+		wsLabel.Text=value.."/"..WS_MAX
+		if walkSpeedOn then
+			local hum=getHum()
+			if hum then hum.WalkSpeed=value end
+		end
 	end
-end)
+
+	track(wsTrack.InputBegan:Connect(function(input)
+		if input.UserInputType==Enum.UserInputType.MouseButton1
+			or input.UserInputType==Enum.UserInputType.Touch then
+			wsDragging=true
+			updateWsSlider(input.Position.X)
+		end
+	end))
+	track(wsTrack.InputEnded:Connect(function(input)
+		if input.UserInputType==Enum.UserInputType.MouseButton1
+			or input.UserInputType==Enum.UserInputType.Touch then
+			wsDragging=false
+		end
+	end))
+	track(UserInputService.InputChanged:Connect(function(input)
+		if wsDragging and (input.UserInputType==Enum.UserInputType.MouseMovement
+			or input.UserInputType==Enum.UserInputType.Touch) then
+			updateWsSlider(input.Position.X)
+		end
+	end))
+end
 
 ---------------------------------------------------------------- PAGE: AIMLOCK
 -- Enable toggle
@@ -1700,9 +1723,17 @@ track(UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end))
 
----------------------------------------------------------------- drag
+---------------------------------------------------------------- drag (เฉพาะแถบบน)
+local dragBar = Instance.new("Frame")
+dragBar.Size = UDim2.new(1, -45, 0, 8)
+dragBar.Position = UDim2.fromOffset(0, 0)
+dragBar.BackgroundTransparency = 1
+dragBar.Active = true
+dragBar.ZIndex = 50
+dragBar.Parent = main
+
 local dragging,dragStart,startPos2=false,nil,nil
-track(main.InputBegan:Connect(function(input)
+track(dragBar.InputBegan:Connect(function(input)
 	if input.UserInputType==Enum.UserInputType.MouseButton1
 		or input.UserInputType==Enum.UserInputType.Touch then
 		dragging=true; dragStart=input.Position; startPos2=main.Position
